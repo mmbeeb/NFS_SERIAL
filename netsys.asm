@@ -151,14 +151,15 @@ ENDIF
 	JSR Sub_8677_DecNum
 	BCC Label_8098			; If no '.'
 
-	STA &0E01			; FS Station Net
+	STA MA+&0E01			; FS Station Net
 
 	INY
 	JSR Sub_8677_DecNum
 
 .Label_8098
 	BEQ Label_809D
-	STA &0E00			; FS Station ID
+	
+	STA MA+&0E00			; FS Station ID
 
 .Label_809D
 	JSR Sub_8D82_CopyString_ptrBE	; Copy string from ptrBE+Y to &0F05
@@ -168,7 +169,7 @@ ENDIF
 	DEY
 	BEQ Sub_80C5_CommandLine	; Exit loop, Y = 0 :. FS Function 0 = Command line
 
-	LDA &0F05,Y
+	LDA MA+&0F05,Y
 	CMP #&3A
 	BNE Loop_80A0			; If <> ':'
 
@@ -177,7 +178,7 @@ ENDIF
 .Loop_80AD				; Get password
 	JSR Sub_84A1_Test_ESCAPE
 	JSR OSRDCH
-	STA &0F05,Y
+	STA MA+&0F05,Y
 	INY
 	INX
 	CMP #&0D
@@ -194,10 +195,10 @@ ENDIF
 .Sub_80C5_CommandLine
 	JSR Sub_83C7_Transaction	; Y = FS function
 
-	LDX &0F03
+	LDX MA+&0F03
 	BEQ Return_80F6			; If X = 0 then successful so exit
 
-	LDA &0F05
+	LDA MA+&0F05
 	LDY #&17
 	BNE DoNFSCall			; always
 
@@ -445,16 +446,21 @@ ENDIF
 	SEC
 	ROR &A8
 	JSR Sub_827B_ClaimWorkspace	; Claim vectors + static workspace (?&A8<>0)
+
+IF _SWRAM_
+	JMP Sub_8264_CopyVectors
+ELSE
 	LDY #&1D			; Copy saved values from private workspace to &E00-&E08
 
 .Loop_81FC
 	LDA (ptr9CL_PWS0),Y
-	STA &0DEB,Y
+	STA MA+&0E00-&15,Y
 	DEY
 	CPY #&14
 	BNE Loop_81FC
 
 	BEQ Sub_8264_CopyVectors	; always -> copy vectors etc.
+ENDIF
 }
 
 .NFS_SERVICE_09				; *HELP
@@ -534,8 +540,11 @@ ENDIF
 	LDA #&8F			; Issue ROM Service call (X=type)
 	LDX #&0F			; Vectors claimed
 	JSR OSBYTE
+	
+IF NOT(_SWRAM_)
 	LDX #&0A			; Claim Static Workspace
 	JSR OSBYTE
+ENDIF
 
 	LDX &A8
 	BNE Label_82C2			; Exit, else autoboot.
@@ -578,10 +587,15 @@ ENDIF
 	\ This next routine is in the middle of the table
 	\ and thus must always be 7 bytes long.
 .NFS_SERVICE_01				; Absolute workpace claim
+IF _SWRAM_
+	RTS
+	EQUB 0, 0, 0, 0, 0
+ELSE
 	CPY #&10			; Need at least 2 pages (&0E,&0F)
 	BCS Label_82C2
 
 	LDY #&10
+ENDIF
 
 .Label_82C2
 	RTS
@@ -590,39 +604,58 @@ ENDIF
 
 .NFS_SERVICE_02				; Private workspace claim
 {
+IF _SWRAM_
+	TYA
+	PHA
+	
+	LDY #HI(WSPC)+2
+ENDIF
+
 	STY ptr9CH_PWS0			; Y=first page available
 	INY
 	STY ptr9EH_PWS1
 
 	LDA #&00
-	LDY #&04
-	STA (ptr9CL_PWS0),Y		; ?&9C value?
-
-	LDY #&FF
-
 	STA ptr9CL_PWS0
 	STA ptr9EL_PWS1
 	STA &A8
 	STA &0D62
+	
+	LDY #&04
+	STA (ptr9CL_PWS0),Y
 
-	TAX
+	TAX						;X=0
+	LDY #&FF
 	LDA #&FD
-	JSR OSBYTE			; Read hard/soft BREAK
+	JSR OSBYTE				; Read hard/soft BREAK
 	TXA
 	BEQ Label_8316			; X=0=soft
+	
+	; **** HARD BREAK ****
+
+	LDA #DEFAULT_FS_STN
+	STA MA+&0E00			; Default File Server
 
 	LDY #&15
-	LDA #&FE
-	STA &0E00
 	STA (ptr9CL_PWS0),Y
 
 	LDA #&00
-	STA &0E01
+	STA MA+&0E01
+	
+IF NOT(_ADLC_)
+	DEY						; Y=&14
+	STA (ptr9CL_PWS0),Y
+ENDIF
+	
 	STA ProtectionMask_D63
 	STA ShowInfo
-	STA &0E05
+	STA MA+&0E05
 
-	INY
+IF _ADLC_
+	INY						; Y=&16
+ELSE
+	LDY #&16
+ENDIF
 	STA (ptr9CL_PWS0),Y
 
 	LDY #&03
@@ -632,28 +665,38 @@ ENDIF
 	STA (ptr9EL_PWS1),Y
 
 .Loop_8307
-	LDA &A8				; Set up control blocks
+	LDA &A8					; Set up control blocks
 	JSR Sub_8E55			; Y=A*12
 	BCS Label_8316			; A>17
 
-	LDA #&3F			; Mark control block as empty
+	LDA #&3F				; Mark control block as empty
 	STA (ptr9EL_PWS1),Y
 	INC &A8
-	BNE Loop_8307
+	BNE Loop_8307			; always
 
 .Label_8316
 IF _ADLC_
 	LDA _INTOFF_STATIONID		; A = Station ID
-ELSE
-	LDA #0
-ENDIF
 	LDY #&14
 	STA (ptr9CL_PWS0),Y
+ENDIF
 
 	JSR Sub_9633_Listen_Start	; START LISTENING!
+	
+IF NOT(_ADLC_)
+	JSR sp_send_RESET
+ENDIF
 
 	LDA #&40
 	STA RXTX_Flags_D64
+
+IF _SWRAM_
+	JSR Sub_8325_Set_NETV
+	PLA
+	TAY					; Restore Y
+	RTS
+ENDIF
+
 }
 
 .Sub_8325_Set_NETV
@@ -682,21 +725,25 @@ ENDIF
 	DEX
 	BNE Loop_8339
 
+IF NOT(_SWRAM_)
 	LDY ptr9EH_PWS1
 	INY
+ENDIF
 	RTS
 }
 
 .NFS_CALL_19				; FSC 6 New fs taking over
 {
+IF NOT(_SWRAM_)
 	LDY #&1D			; Copy &E00 to &E08 to private workspace
 
 .Label_8353
-	LDA &0DEB,Y			; &0DEB+&15=&E00
+	LDA MA+&0E00-&15,Y
 	STA (ptr9CL_PWS0),Y
 	DEY
 	CPY #&14
 	BNE Label_8353
+ENDIF
 
 	LDA #&77			; Close *SPOOL and *EXEC files
 	JMP OSBYTE
@@ -772,7 +819,7 @@ ENDIF
 	CPY #&02
 	BPL Label_83A8			; If Y >= 2
 
-	LDA &0E00,Y			; Copy FS Station ID & Net
+	LDA MA+&0E00,Y			; Copy FS Station ID & Net
 	STA &00C2,Y
 
 .Label_83A8
@@ -788,11 +835,12 @@ ENDIF
 	EQUB &80
 	EQUB &99			; Receiving Port/Destination Port
 	EQUB &00			; FS Station ID
-	EQUB &00			; FS Station Net
-	EQUB &00, &0F			; &FFFF0F00 (buffer start)
+	EQUB &00			; FS Station Net	
+	EQUW MA+&0F00		; &FFFF0F00 (buffer start)
 .Data_83B3				; This byte is BITed to set V.
-	EQUB &FF, &FF
-	EQUB &FF, &0F, &FF, &FF		; &FFFF0FFF (buffer end)
+	EQUW &FFFF
+	EQUW MA+&0FFF
+	EQUW &FFFF			; &FFFF0FFF (buffer end)
 
 	\ Only called by GPBP
 	\ A = Internal Handle, X = 8 bytes, Y = FS 10 / FS 11
@@ -823,21 +871,21 @@ ENDIF
 	\ Y = FS Function
 	\ X = Size of data block
 .Sub_83C8_Transaction
-	LDA &0E02			; File handle of main directory
-	STA &0F02
+	LDA MA+&0E02			; File handle of main directory
+	STA MA+&0F02
 
 .Label_83CE
 	CLC
 
 .Label_83CF
 {
-	STY &0F01			; FS Function Code
+	STY MA+&0F01			; FS Function Code
 
 	LDY #&01			; File handles of current directory and library
 
 .Loop_83D4
-	LDA &0E03,Y
-	STA &0F03,Y
+	LDA MA+&0E03,Y
+	STA MA+&0F03,Y
 	DEY
 	BPL Loop_83D4
 }					; C = 0
@@ -851,7 +899,7 @@ ENDIF
 	PHP
 
 	LDA #&90
-	STA &0F00			; Reply Port
+	STA MA+&0F00			; Reply Port
 
 	JSR Sub_8395_SetupBuffer	; Setup tx control block @ &00C0
 					; X preserved
@@ -918,7 +966,7 @@ ENDIF
 	JSR Sub_8657_ESCAPE_disable	; ESCAPE disabled
 
 	PHA
-	STA &0FDF
+	STA MA+&0FDF
 	TXA
 	PHA
 	TYA
@@ -927,11 +975,11 @@ ENDIF
 
 	STY &BA
 	JSR Sub_869B_FileHandleY
-	STY &0FDE			; Y = Internal Handle
+	STY MA+&0FDE			; Y = Internal Handle
 	STY &CF
 
 	LDY #&90			; Reply Port
-	STY &0FDC
+	STY MA+&0FDC
 
 	JSR Sub_8395_SetupBuffer	; Exit: Y = &FF
 
@@ -951,21 +999,21 @@ ENDIF
 	DEX				; X = 8 = FS Function 8 Read Byte
 
 .Label_8441
-	STX &0FDD
+	STX MA+&0FDD
 
 	LDA &CF				; A = Internal Handle
 	LDX #&C0			; Y:X = &00C0
 	JSR Sub_9266_Do_Transaction_ptr9A	; Transmit and wait for reply
 
-	LDX &0FDD
+	LDX MA+&0FDD
 	BEQ Label_8498			; If Return Code = 0 (no error)
 
 	\ Error!
 
 	LDY #&1F			; Copy error string
 .Loop_8452
-	LDA &0FDC,Y
-	STA &0FE0,Y
+	LDA MA+&0FDC,Y
+	STA MA+&0FE0,Y
 	DEY
 	BPL Loop_8452
 
@@ -992,13 +1040,13 @@ ENDIF
 	LDA #&E0			; ptrC4 = &0FE0
 	STA &C4
 
-	LDX &0FDD			; X = error
+	LDX MA+&0FDD			; X = error
 }
 
 	\ Entry: X = Return Code
 .Sub_847A_ReportNetError
 {
-	STX &0E09			; Return Code
+	STX MA+&0E09			; Return Code
 
 	LDY #&01
 	CPX #&A8
@@ -1022,7 +1070,7 @@ ENDIF
 }
 
 .Label_8498
-	STA &0E08
+	STA MA+&0E08
 
 	PLA
 	TAY
@@ -1205,7 +1253,7 @@ ENDIF
 
 	SEC
 	LDA #&FE
-	BIT &0FDF
+	BIT MA+&0FDF
 	BVS Label_857F
 
 	CLC
@@ -1218,7 +1266,7 @@ ENDIF
 
 .Label_8579
 	JSR Sub_86D0
-	LDA &0FDE
+	LDA MA+&0FDE
 
 .Label_857F
 	RTS
@@ -1515,15 +1563,15 @@ ENDIF
 	RTS
 
 .Sub_86D0
-	ORA &0E07
+	ORA MA+&0E07
 	BNE Label_86DA
 
 .Sub_86D5
 	EOR #&FF
-	AND &0E07
+	AND MA+&0E07
 
 .Label_86DA
-	STA &0E07
+	STA MA+&0E07
 	RTS
 
 	\ Only used by FILEV
@@ -1557,18 +1605,18 @@ ENDIF
 	BCS Label_86FD
 
 	INX
-	STA &0E30,X
+	STA MA+&0E30,X
 	BCC Label_86F2			; always
 
 .Label_86FD
 	INX
 
 	LDA #&0D			; Terminate string with CR
-	STA &0E30,X
+	STA MA+&0E30,X
 
-	LDA #&30			; Set pointer ptrBE to string
+	LDA #LO(MA+&0E30)	; Set pointer ptrBE to string
 	STA ptrBEL			; (ptrBE = &0E30)
-	LDA #&0E
+	LDA #HI(MA+&0E30)
 	STA ptrBEH
 	RTS
 }
@@ -1601,7 +1649,7 @@ ENDIF
 {
 	LDA #&92			; Reply Port
 	STA ESC_ON			; Enable ESCAPE key
-	STA &0F02
+	STA MA+&0F02
 
 	JSR Sub_83BD_Transaction	; Send load request, exits with X=0
 
@@ -1625,14 +1673,14 @@ ENDIF
 .Loop_8742
 	LDA &B0,X			; !&C8 = !&B0 ("buffer end")
 	STA &C8,X
-	ADC &0F0D,X			; !&B4 = !&B0 + !&F0D (File size)
+	ADC MA+&0F0D,X			; !&B4 = !&B0 + !&F0D (File size)
 	STA &B4,X
 	INX
 	DEY
 	BNE Loop_8742
 
 	SEC
-	SBC &0F10
+	SBC MA+&0F10
 	STA &B7
 	
 	JSR Sub_8765_GetRemoteData
@@ -1640,8 +1688,8 @@ ENDIF
 	LDX #&02
 
 .Loop_875A
-	LDA &0F10,X			; #&0F05 = #&0F10 (Attributes & Date?)
-	STA &0F05,X
+	LDA MA+&0F10,X			; #&0F05 = #&0F10 (Attributes & Date?)
+	STA MA+&0F05,X
 	DEX
 	BPL Loop_875A
 
@@ -1715,7 +1763,7 @@ ENDIF
 	JSR Sub_884E_Y_MINUS_4
 
 	SBC (ptrBBL),Y			; &A, &B, &C, &D
-	STA &0F03,Y			; &F0D, &F0E, &F0F, &F10
+	STA MA+&0F03,Y			; &F0D, &F0E, &F0F, &F10
 
 	PHA
 	LDA (ptrBBL),Y
@@ -1733,14 +1781,14 @@ ENDIF
 
 .Loop_87B7				; Copy rest of OSWORD block to &F03
 	LDA (ptrBBL),Y			; (F03)-F04 Filename address
-	STA &0F03,Y			; F05-F08 Load address
+	STA MA+&0F03,Y			; F05-F08 Load address
 	DEY				; F09-F0C Execution address
 	BNE Loop_87B7
 
 	LDA #&91
 	STA ESC_ON			; Enable ESCAPE
 
-	STA &0F02			; Reply Port
+	STA MA+&0F02			; Reply Port
 	STA &B8
 
 	LDX #&0B			; Copy filename
@@ -1749,13 +1797,13 @@ ENDIF
 	LDY #&01			; FS function = 1
 	JSR Sub_83BD_Transaction	; Tell the file server to expect data!
 
-	LDA &0F05			; Dest Port
+	LDA MA+&0F05			; Dest Port
 	JSR Sub_8853_SendRemoteData	; Send Data
 }
 
 .Sub_87D8
 {
-	LDA &0F03			; Command Code from FS
+	LDA MA+&0F03			; Command Code from FS
 
 	PHA
 	JSR Sub_83F3_WaitForReply
@@ -1800,15 +1848,15 @@ ENDIF
 	JSR OSNEWL
 
 .Label_8817
-	STX &0F08
+	STX MA+&0F08
 	LDY #&0E
-	LDA &0F05
+	LDA MA+&0F05
 	JSR Sub_85D9
 
 .Label_8822
 	STA (ptrBBL),Y
 	INY
-	LDA &0EF7,Y
+	LDA MA+&0EF7,Y
 	CPY #&12
 	BNE Label_8822
 
@@ -1848,7 +1896,7 @@ ENDIF
 
 .Loop_8844
 	STA (ptrBBL),Y
-	LDA &0F02,Y
+	LDA MA+&0F02,Y
 	DEY
 	CPY #&02
 	BCS Loop_8844
@@ -1885,9 +1933,9 @@ ENDIF
 
 	TAX
 
-	LDA &0F07			; K = !&F06 AND &FFFF
+	LDA MA+&0F07			; K = !&F06 AND &FFFF
 	PHA
-	LDA &0F06
+	LDA MA+&0F06
 	PHA
 
 	LDY #&04			; TxS = S(x)
@@ -1958,19 +2006,19 @@ ENDIF
 	JSR Sub_869A_FileHandleA
 
 	TYA
-	AND &0E07
+	AND MA+&0E07
 	TAX
 	BEQ Label_88CD
 
 	PHA
-	STY &0F05
+	STY MA+&0F05
 
 	LDY #&11			; FS function = 17
 	LDX #&01			; Length = 1
 	JSR Sub_83C7_Transaction
 
 	PLA
-	LDX &0F05
+	LDX MA+&0F05
 	BNE Label_88CD
 
 	JSR Sub_86D5
@@ -1983,7 +2031,7 @@ ENDIF
 
 	\ OSFILE 0 < A < &80
 .Label_88D1
-	STA &0F05
+	STA MA+&0F05
 	CMP #&06
 	BEQ Label_8917
 	BCS Label_8922
@@ -2005,7 +2053,7 @@ ENDIF
 
 .Label_88EE
 	LDA (ptrBBL),Y
-	STA &0F06,X
+	STA MA+&0F06,X
 	DEY
 	DEX
 	BPL Label_88EE
@@ -2015,13 +2063,13 @@ ENDIF
 
 .Label_88FB
 	JSR Sub_85CF
-	STA &0F0E
+	STA MA+&0F0E
 	LDY #&09
 	LDX #&08
 
 .Label_8905
 	LDA (ptrBBL),Y
-	STA &0F05,X
+	STA MA+&0F05,X
 	DEY
 	DEX
 	BNE Label_8905
@@ -2050,7 +2098,7 @@ ENDIF
 .Label_8926
 	JSR Sub_85CF
 
-	STA &0F06
+	STA MA+&0F06
 	LDX #&02
 	BNE Label_8910			; always
 
@@ -2061,9 +2109,9 @@ ENDIF
 	LDY #&12			; FS function = 18
 	JSR Sub_83C7_Transaction
 
-	LDA &0F11
-	STX &0F11
-	STX &0F14
+	LDA MA+&0F11
+	STX MA+&0F11
+	STX MA+&0F14
 	JSR Sub_85D9
 	LDY #&0E
 	STA (ptrBBL),Y
@@ -2071,7 +2119,7 @@ ENDIF
 	LDX #&0C
 
 .Label_894D
-	LDA &0F05,X
+	LDA MA+&0F05,X
 	STA (ptrBBL),Y
 	DEY
 	DEX
@@ -2082,13 +2130,13 @@ ENDIF
 	LDY #&11
 
 .Label_895A
-	LDA &0F12,X
+	LDA MA+&0F12,X
 	STA (ptrBBL),Y
 	DEY
 	DEX
 	BPL Label_895A
 
-	LDA &0F05
+	LDA MA+&0F05
 
 .Label_8966
 	BPL Label_89B5
@@ -2103,9 +2151,9 @@ ENDIF
 	BEQ Label_89BA
 
 	JSR Sub_869B_FileHandleY
-	STY &0F05
+	STY MA+&0F05
 	LSR A
-	STA &0F06
+	STA MA+&0F06
 	BCS Label_8999
 
 	LDY #&0C			; FS function = 12
@@ -2118,7 +2166,7 @@ ENDIF
 	STA &03,X
 
 .Label_898E
-	LDA &0F05,Y
+	LDA MA+&0F05,Y
 	STA &02,X
 	DEX
 	DEY
@@ -2134,7 +2182,7 @@ ENDIF
 
 .Label_899D
 	LDA &03,X
-	STA &0F07,Y
+	STA MA+&0F07,Y
 	DEX
 	DEY
 	BPL Label_899D
@@ -2169,7 +2217,7 @@ ENDIF
 	BNE Label_89B5
 
 .Label_89C8
-	LDA &0E0A,Y
+	LDA MA+&0E0A,Y
 	STA (ptrBBL),Y
 	DEY
 	BPL Label_89C8
@@ -2194,9 +2242,9 @@ ENDIF
 	TXA
 	EOR #&80
 	ASL A
-	STA &0F05
+	STA MA+&0F05
 	ROL A
-	STA &0F06
+	STA MA+&0F06
 	JSR Sub_86E8
 
 	LDX #&02
@@ -2207,7 +2255,7 @@ ENDIF
 	JSR Sub_83C8_Transaction
 	BCS Label_89B5
 
-	LDA &0F05
+	LDA MA+&0F05
 	TAX
 	JSR Sub_86D0
 	TXA
@@ -2224,13 +2272,13 @@ ENDIF
 	LDY #&00
 
 .Label_8A1A
-	STY &0F05
+	STY MA+&0F05
 
 	LDX #&01			; Length = 1
 	LDY #&07			; FS function = 7
 	JSR Sub_83C7_Transaction
 
-	LDA &0F05
+	LDA MA+&0F05
 	JSR Sub_86D0
 
 .Label_8A2A
@@ -2263,13 +2311,13 @@ ENDIF
 	\ *OPT 4,Y (Y<4)
 	\ Set Autostart Option (option sent to FS)
 .Label_8A43
-	STY &0F05
+	STY MA+&0F05
 
 	LDY #&16			; FS Function = 22 = Write Autostart Option
 	JSR Sub_83C7_Transaction
 
 	LDY ptrBBH			; Original Y
-	STY &0E05
+	STY MA+&0E05
 
 .Label_8A50
 	BCC Label_8A2A
@@ -2292,11 +2340,11 @@ ENDIF
 	BIT &B2
 	BMI Label_8A68
 
-	ADC &0E0A,X
+	ADC MA+&0E0A,X
 	JMP Label_8A6B
 
 .Label_8A68
-	SBC &0E0A,X
+	SBC MA+&0E0A,X
 
 .Label_8A6B
 	STA (ptrBBL),Y
@@ -2336,14 +2384,14 @@ ENDIF
 .Label_8A8B
 	LDA (ptrBBL),Y
 	JSR Sub_869A_FileHandleA
-	STY &0F05			; Internal Hanlde
+	STY MA+&0F05			; Internal Hanlde
 
 	LDY #&0B			; Copy sequential pointer
 	LDX #&06			; and Number of bytes to transfer
 
 .Label_8A97
 	LDA (ptrBBL),Y
-	STA &0F06,X
+	STA MA+&0F06,X
 	DEY
 	CPY #&08
 	BNE Label_8AA2
@@ -2362,7 +2410,7 @@ ENDIF
 	INX				; X = 1
 
 .Label_8AAB
-	STX &0F06
+	STX MA+&0F06
 
 	LDY #&0B			; FS Function 11 Write Bytes
 	LDX #&91
@@ -2375,16 +2423,16 @@ ENDIF
 	DEY				; FS Function 10 Read Bytes
 
 .Label_8AB9
-	STX &0F02
+	STX MA+&0F02
 	STX &B8
 
 	LDX #&08
-	LDA &0F05			; A = Internal Handle
+	LDA MA+&0F05			; A = Internal Handle
 
 	JSR Sub_83B9_GPBP_Transaction	; Transmit
 
 	LDA &B3
-	STA &0E08
+	STA MA+&0E08
 
 	LDX #&04
 
@@ -2404,15 +2452,15 @@ ENDIF
 	INX
 
 .Label_8AE4
-	LDA &0F03,X
-	STA &0F06,X
+	LDA MA+&0F03,X
+	STA MA+&0F06,X
 	DEX
 	BPL Label_8AE4
 
 	PLA
 	BNE Label_8AF8
 
-	LDA &0F02			; Dest Port
+	LDA MA+&0F02			; Dest Port
 	JSR Sub_8853_SendRemoteData
 	BCS Label_8AFB			; always
 
@@ -2423,7 +2471,7 @@ ENDIF
 	JSR Sub_83F3_WaitForReply
 
 	LDA (ptrBBL,X)
-	BIT &0F05
+	BIT MA+&0F05
 	BMI Label_8B08
 
 	JSR Sub_86D5
@@ -2438,15 +2486,15 @@ ENDIF
 	SEC
 	JSR Sub_8A5A
 
-	ASL &0F05
+	ASL MA+&0F05
 	JMP Label_89D4
 
 .Label_8B1C
 	LDY #&15			; FS function = 21
 	JSR Sub_83C7_Transaction
 
-	LDA &0E05
-	STA &0F16
+	LDA MA+&0E05
+	STA MA+&0F16
 	STX &B0
 	STX &B1
 	LDA #&12
@@ -2484,19 +2532,19 @@ ENDIF
 
 .Label_8B53
 	TAY
-	LDA &0E03,Y
-	STA &0F03
-	LDA &0E04
-	STA &0F04
-	LDA &0E02
-	STA &0F02
+	LDA MA+&0E03,Y
+	STA MA+&0F03
+	LDA MA+&0E04
+	STA MA+&0F04
+	LDA MA+&0E02
+	STA MA+&0F02
 	LDX #&12
-	STX &0F01
+	STX MA+&0F01
 	LDA #&0D
-	STA &0F06
+	STA MA+&0F06
 	STA &B2
 	LSR A
-	STA &0F05
+	STA MA+&0F05
 
 	CLC
 	JSR Sub_83DD_Transaction
@@ -2512,7 +2560,7 @@ ENDIF
 	LDY &B1
 
 .Label_8B87
-	LDA &0F05,X
+	LDA MA+&0F05,X
 	STA (ptrBEL),Y
 	INX
 	INY
@@ -2535,7 +2583,7 @@ ENDIF
 	LDX &B0
 
 .Label_8BA6
-	LDA &0F05,X
+	LDA MA+&0F05,X
 	STA TUBE_R3_DATA
 
 	INX
@@ -2556,29 +2604,29 @@ ENDIF
 .Label_8BBE
 	LDY #&09
 	LDA (ptrBBL),Y
-	STA &0F06
+	STA MA+&0F06
 	LDY #&05
 	LDA (ptrBBL),Y
-	STA &0F07
+	STA MA+&0F07
 	LDX #&0D
-	STX &0F08
+	STX MA+&0F08
 	LDY #&02
 	STY &B0
-	STY &0F05
+	STY MA+&0F05
 
 	INY				; FS function = 3
 	JSR Sub_83C7_Transaction
 
 	STX &B1
-	LDA &0F06
+	LDA MA+&0F06
 	STA (ptrBBL,X)
-	LDA &0F05
+	LDA MA+&0F05
 	LDY #&09
 	ADC (ptrBBL),Y
 	STA (ptrBBL),Y
 	LDA &C8
 	SBC #&07
-	STA &0F06
+	STA MA+&0F06
 	STA &B2
 	BEQ Label_8BFA
 
@@ -2588,15 +2636,15 @@ ENDIF
 	LDX #&02
 
 .Label_8BFC
-	STA &0F07,X
+	STA MA+&0F07,X
 	DEX
 	BPL Label_8BFC
 
 	JSR Sub_8A57
 	SEC
 	DEC &B2
-	LDA &0F05
-	STA &0F06
+	LDA MA+&0F05
+	STA MA+&0F06
 	JSR Sub_8A5A
 	BEQ Label_8BBB
 }
@@ -2690,7 +2738,7 @@ ENDIF
 	STX &B7
 
 	LDA #&06
-	STA &0F05
+	STA MA+&0F05
 	JSR Sub_86EA			; Copy parameter to (BE)
 
 	LDX #&01
@@ -2703,11 +2751,11 @@ ENDIF
 	JSR Sub_8D47			; Print Directory Name
 	JSR PrintString
 	EQUS "("
-	LDA &0F13			; Directory Cycle Number
+	LDA MA+&0F13			; Directory Cycle Number
 	JSR Sub_8DBD_PrintDecimal
 	JSR PrintString
 	EQUS ")     "
-	LDY &0F12
+	LDY MA+&0F12
 	BNE Label_8CB0
 
 	JSR PrintString
@@ -2729,7 +2777,7 @@ ENDIF
 	JSR PrintString
 	EQUS "    Option "
 
-	LDA &0E05
+	LDA MA+&0E05
 	TAX
 	JSR Utils_PrintHexByte
 
@@ -2763,12 +2811,12 @@ ENDIF
 	JSR OSNEWL
 
 .Label_8D11
-	STY &0F06
+	STY MA+&0F06
 	STY &B4
 	LDX &B5
-	STX &0F07
+	STX MA+&0F07
 	LDX &B7
-	STX &0F05
+	STX MA+&0F05
 	LDX #&03
 	JSR Sub_8D84_CopyString_ptrBE	; Copy string from ptrBE+Y to &0F05+X
 
@@ -2776,7 +2824,7 @@ ENDIF
 	JSR Sub_83C7_Transaction
 
 	INX
-	LDA &0F05
+	LDA MA+&0F05
 	BNE Label_8D33
 
 	JMP OSNEWL
@@ -2786,10 +2834,10 @@ ENDIF
 
 .Label_8D34
 	INY
-	LDA &0F05,Y
+	LDA MA+&0F05,Y
 	BPL Label_8D34
 
-	STA &0F04,Y
+	STA MA+&0F04,Y
 	JSR Sub_8D9F
 	PLA
 	CLC
@@ -2801,7 +2849,7 @@ ENDIF
 	LDY #&0A			; 10 chrs
 
 .Sub_8D49
-	LDA &0F05,X
+	LDA MA+&0F05,X
 	JSR OSASCI
 	INX
 	DEY
@@ -2871,7 +2919,7 @@ ENDIF
 	LDY #&00
 .Loop_8D86
 	LDA (ptrBEL),Y
-	STA &0F05,X
+	STA MA+&0F05,X
 	INX
 	INY
 	EOR #&0D
@@ -2890,7 +2938,7 @@ ENDIF
 	\ Print string at &0F05+X.
 	\ String terminated if bit 7 set.
 .Sub_8D98
-	LDA &0F05,X
+	LDA MA+&0F05,X
 	BMI Return_8D91			; Exit loop
 	BNE Label_8DB4
 
@@ -2969,18 +3017,18 @@ ENDIF
 	CLC
 	TYA
 	ADC TextPointer
-	STA &0E0A
+	STA MA+&0E0A
 	LDA TextPointer+1
 
 	ADC #&00
-	STA &0E0B
+	STA MA+&0E0B
 
-	LDX #&0E			; PtrBB = &0E10
+	LDX #HI(MA+&0E10)	; PtrBB = &0E10
 	STX ptrBBH
-	LDA #&10
+	LDA #LO(MA+&0E10)
 	STA ptrBBL
 
-	STA &0E16
+	STA MA+&0E16
 	LDX #&4A
 
 	LDY #&05			; FS function = 5
@@ -2989,27 +3037,27 @@ ENDIF
 	LDA TubePresent_D67
 	BEQ Label_8E29
 
-	ADC &0F0B
-	ADC &0F0C
+	ADC MA+&0F0B
+	ADC MA+&0F0C
 	BCS Label_8E29
 
 	JSR Sub_8C13
 
-	LDX #&09
-	LDY #&0F
-	LDA #&04
+	LDX #LO(MA+&0F09)
+	LDY #HI(MA+&0F09)
+	LDA #&04			; Execute code at YX in parasite
 	JMP TubeCode
 
 .Label_8E29
 	ROL A
-	JMP (&0F09)
+	JMP (MA+&0F09)
 
 .NFS_CALL_20
-	STY &0E04
+	STY MA+&0E04
 	BCC Label_8E35
 
 .NFS_CALL_1E
-	STY &0E03
+	STY MA+&0E03
 
 .Label_8E35
 	JMP Label_89B3
@@ -3022,16 +3070,15 @@ ENDIF
 	BCC Label_8E43
 
 .Label_8E3D
-	LDA &0F05,X
-	STA &0E02,X
+	LDA MA+&0F05,X
+	STA MA+&0E02,X
 
 .Label_8E43
 	DEX
 	BPL Label_8E3D
 	BCC Label_8E35
 
-	LDY &0E05			; Why?
-
+	LDY MA+&0E05
 	LDX Data_8D68,Y
 	LDY #HI(Data_8D68)
 	JMP OSCLI
@@ -3283,19 +3330,19 @@ ENDIF
 	JSR Sub_869A_FileHandleA	; File handle to bit mask
 	TYA
 	LDY &A8
-	STA &0E01,Y
+	STA MA+&0E01,Y
 	DEC &A8
 	BNE Label_8F57
 	RTS
 
 .Label_8F69
 	INY
-	LDA &0E09			; Error number
+	LDA MA+&0E09			; Error number
 	STA (&F0),Y
 	RTS
 
 .Label_8F70
-	LDA &0E01,Y			; 
+	LDA MA+&0E01,Y			; 
 	JSR Sub_86B7			; Convert to file handle
 	STA (&F0),Y			; Store in OW block
 	DEY
@@ -3415,9 +3462,9 @@ ENDIF
 
 .Loop_8FF6
 	LDA Data_83AD-&18,Y		; Ctrl block template
-	BNE Label_8FFE			; If Y not &19,&1A,&1B: Port & Station
+	BNE Label_8FFE			; If Y not &1A,&1B,&1C: Station, Net, ?(buffer start reset later)
 
-	LDA &0DE6,Y			; &DE6+&1A=&E00 is FS station
+	LDA MA+&0E00-&1A,Y
 
 .Label_8FFE
 	STA (ptr9EL_PWS1),Y
@@ -3436,10 +3483,11 @@ ENDIF
 	STA (&F0),Y			; Reply port number = &90
 
 	INY
-	INY				; Y=4
+	INY					; Y=4
 
 .Loop_9015
-	LDA &0DFE,Y			; &DFE+4=&E02
+	;LDA &0DFE,Y			; &DFE+4=&E02
+	LDA MA+&0E00-2,Y
 	STA (&F0),Y			; Copy file handles of directories: main, current dir + library
 	INY
 	CPY #&07
@@ -3932,7 +3980,7 @@ ENDIF
 	STY ptr9AH
 
 	PHA
-	AND &0E08
+	AND MA+&0E08
 	BEQ Label_9272
 
 	LDA #&01
@@ -3985,7 +4033,7 @@ ENDIF
 
 	PLA
 	PLA
-	EOR &0E08
+	EOR MA+&0E08
 	RTS
 }
 

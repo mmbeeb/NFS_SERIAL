@@ -28,4 +28,4 @@
 	ptrBEL = &BE
 	ptrBEH = &BF
 
-	ShowInfo = &0E06
+	ShowInfo = MA+&0E06

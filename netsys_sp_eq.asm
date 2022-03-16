@@ -10,6 +10,7 @@
 	SP_FLAG_DATA = &be
 	SP_FLAG_SCOUT = &ce
 	SP_FLAG_BROADCAST = &de
+	SP_FLAG_RESET = &d6
 	SP_FLAG_ACK = &ee
 	SP_FLAG_NAK = &fe
 	

@@ -116,8 +116,8 @@ ENDIF
 .L4A
 	LDY SP_RX_STATE2	
 	CPY #SP_FLAG_SCOUT
-	BEQ	L3						;Listening for scout, but broadcast OK
-	BNE L4B						;Not expecting broadcast
+	BEQ	L3						;Listening for scout, but broadcast/reset OK
+	BNE L4B						;Not expecting broadcast/reset
 	
 	;WRONG KIND OF FRAME RECEIVED!
 	;If listening for scout, just ignore.
@@ -126,6 +126,8 @@ ENDIF
 	
 .L4	CMP #SP_FLAG_BROADCAST
 	BEQ L4A						;If broadcast
+	CMP #SP_FLAG_RESET
+	BEQ L4A						;If reset
 
 .L4B
 	LDA SP_RX_STATE2			;The flag we were expecting.
@@ -179,11 +181,23 @@ ENDIF
 	;Broadcast?
 	LDA SP_RX_STATE
 	ROL A
+	ROL A
+	BMI J1 						;Broadcast or reset
+
+.J2	ROR A
 	AND #&40
 	STA RXTX_Flags_D4A			;Bit 6 = Broadcast
 	
 	JMP Sub_9756_RX_Scout
+
+.J1	ROL A
+	BMI J2						;If broadcast
 	
+	;Reset!
+	LDA SP_RX_STN
+	LDY #&14
+	STA (ptr9CL_PWS0),Y			;My station number
+
 .L1	RTS
 
 	;Received ACK or DATA frame
@@ -390,19 +404,30 @@ ENDIF
 	;NOTE: We may have already set things up to receive data.
 	;:. We need to preserve the TUBE flag and stop the TUBE being released (if claimed) at the end of the transmission.
 	
-.L3	STY SP_TX_FLAG
-	STY SP_TUBEEN				;Set bit 7 = Stops the TUBE being released
-	
-	ORA RXTX_Flags_D4A
+.L3	ORA RXTX_Flags_D4A
 	STA RXTX_Flags_D4A
 	
 	LDA SP_RX_STN
 	STA SP_TX_STN
 	LDA SP_RX_NET
 	STA SP_TX_NET
+
+.L3A
+	STY SP_TX_FLAG
+	STY SP_TUBEEN				;Set bit 7 = Stops the TUBE being released
 	
-	LDA #2						;2 bytes in control buffer
+.L4	LDA #2						;2 bytes in control buffer
 	JMP sp_transmit
+
+	;Send reset
+.*sp_send_RESET
+	LDA #&91
+	STA RXTX_Flags_D4A
+	LDA #0
+	STA SP_TX_STN
+	STA SP_TX_NET
+	LDY #SP_FLAG_RESET
+	BNE L3A
 }
 
 

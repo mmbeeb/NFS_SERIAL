@@ -537,10 +537,10 @@ ENDIF
 	ROR SP_ESCFLAG				;SET FLAG
 	RTS
 
-.J16
+.J16							;N=1
 	STY ACIA_TDR				;Y=0
 	STY SP_ESCFLAG				;RESET FLAG
-	BEQ J20						;ALWAYS
+	BMI J20						;ALWAYS
 	
 .J17
 	DEY
@@ -569,7 +569,7 @@ ENDIF
 	BNE J22						;If TX_STATE != 6
 	
 	;TX_STATE == 6 : Send low byte of CRC
-	
+
 	LDA SP_CRC
 	JMP J19						;Y=0
 
@@ -619,10 +619,14 @@ ENDIF
 	H=SP_CRC+1
 	T=SP_CRC_TEMP
 	
+IF FALSE
+	;Same CRC routine as used by the Cassette Filing System (OS 1.20)
+	;and similar to that found in the AUG, page 348.
+
 	PHA
 	
 	SEC
-	ROR T
+	ROR T		;counter
 	
 	EOR H
 	STA H
@@ -646,6 +650,48 @@ ENDIF
 	BNE L1
 
 	PLA
+
+ELSE
+	; FASTER CRC
+	; by Greg Cook, http://6502.org/source/integers/crc-more.html
+	; On exit, A preserved, X undefined, Y = A
+	TAY			;Save A
+	
+	EOR H
+	STA H
+	
+	LSR A
+	LSR A
+	LSR A
+	LSR A
+	TAX
+	
+	ASL A
+	EOR L
+	STA T
+	
+	TXA
+	EOR H
+	STA H
+	
+	ASL A
+	ASL A
+	ASL A
+	TAX
+	
+	ASL A
+	ASL A
+	EOR H
+	STA L
+	
+	TXA
+	ROL A
+	EOR T
+	STA H
+	
+	TYA			;Restore A
+ENDIF
+
 	RTS
 }
 

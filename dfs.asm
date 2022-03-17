@@ -2,15 +2,22 @@
 	\\ dfs.asm
 	\\ Compiler: BeebAsm V1.09
 	\\ Disassembly by Martin Mather
-
-
-	_DNFS_ = FALSE
-	_ADLC_ = FALSE
 	
 	_ADLC_ =? TRUE
 	_DNFS_ =? TRUE
+	_SPDBG_ =? FALSE
 	
-	_SPDBG_ = TRUE
+	DEFAULT_FS_STN =? &FE
+
+	WSPC=&BC00
+IF _SWRAM_
+	MA=WSPC-&0E00
+	;2 pages of static workspace
+	;2 pages of private workspace
+ELSE
+	MA = 0
+ENDIF
+	MP=HI(MA)
 
 	INCLUDE "acorn_os_eq.asm"
 	INCLUDE "netsys_eq.asm"

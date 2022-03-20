@@ -912,6 +912,7 @@ ENDIF
 	BCS Label_8408			; If GPBP
 
 	PHP
+	CLI
 	JSR Sub_85F7_TRANSMIT_C0	; TRANSMIT!
 	PLP
 
@@ -919,6 +920,7 @@ ENDIF
 .Sub_83F3_WaitForReply
 	PHP
 	JSR Sub_8387_SetupBuffer	; Setup rx control block @ &00C0 (Port = &90)
+	CLI
 	JSR Sub_8530_PollForReply	; Exit: Y = 0
 	PLP
 

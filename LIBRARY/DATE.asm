@@ -68,7 +68,7 @@
 	
 	;MONTH
 	LDA MONTH
-	AND #&0F
+	CLC
 	ADC #6
 	JSR PSTR;"January" etc.
 	LDA #' '

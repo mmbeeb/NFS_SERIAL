@@ -8,6 +8,8 @@
 
 	;* Assembled using beebasm 1.09 *
 	
+	LOADADDR =? &0E23
+	
 	CENTURY=21
 	FIRSTDAY=5;Saturday
 	FIRSTLEAP=0
@@ -16,9 +18,8 @@
 	OSWRCH=&FFEE
 	OSWORD=&FFF1
 
-	CLEAR &0E00, &0FFF
-	ORG &0E23
-	GUARD &F00
+	CLEAR LOADADDR, LOADADDR+&200
+	ORG LOADADDR
 
 .DATE_START
 {
@@ -170,9 +171,16 @@
 	TAY
 	BPL L1
 }
-	
-	ORG &0F17
-	GUARD &1000
+
+	;When the file is loaded it overwrites some of the NFS workspace,
+	;including the execution address.
+	;But we get around this by including some data here.
+IF LOADADDR = &0E23
+	ORG &0F02
+	EQUB &69
+	ORG &0F09
+	EQUD &FFFF0E23;Execution address
+ENDIF
 
 .PMSG
 {

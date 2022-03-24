@@ -168,8 +168,14 @@
 	JSR OSWRCH
 	LDA #'d'
 	JMP OSWRCH
+
+	ORG &0F02
 	
-	ORG &0F0D
+	EQUB &69
+	
+	ORG &0F09
+	
+	EQUD &FFFF0E23;Execution address
 	
 .L_0F0D
 	LDA #'r'

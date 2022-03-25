@@ -22,9 +22,9 @@
 	TubePresent_D67 = &0D67
 	
 	;SOME ROUTINES ASSUME THINGS ARE IN THE SAME PAGE
-	;ORG &9630
+	ORG &9630
 	;;ORG &A030
-	ALIGN &0030
+	;ALIGN &0030  this returns 'bad alignment'?
 
 .Sub_9630_Transmit_Start		; Start Transmit
 	JMP Sub_9B6E_Transmit_Start

@@ -14,9 +14,9 @@
 	FIRSTDAY=5;Saturday
 	FIRSTLEAP=0
 
-	OSNEWL=&FFE7
-	OSWRCH=&FFEE
-	OSWORD=&FFF1
+	OSNEWL=?&FFE7
+	OSWRCH=?&FFEE
+	OSWORD=?&FFF1
 
 	CLEAR LOADADDR, LOADADDR+&200
 	ORG LOADADDR
@@ -176,8 +176,6 @@
 	;including the execution address.
 	;But we get around this by including some data here.
 IF LOADADDR = &0E23
-	ORG &0F02
-	EQUB &69
 	ORG &0F09
 	EQUD &FFFF0E23;Execution address
 ENDIF
